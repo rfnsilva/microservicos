@@ -1,110 +1,105 @@
-import { Request, Response } from 'express';
-import { promisify } from 'util';
+import { Request, Response, NextFunction } from 'express';
 import { getRepository } from 'typeorm';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { User } from './entity/User';
 
-export const saveUser = async (req: Request, res: Response) => {
-  const { username, email, senha } = req.body;
+export default class implementacao {
+  async saveUser(req: Request, res: Response) {
+    const { username, email, password } = req.body;
 
-  try {
-      const senhaHash = await bcrypt.hash(senha, 8);
+    try {
+      const passwordHash = await bcrypt.hash(password, 8);
       
       const user = await getRepository(User).save({
-          nome,
-          email,
-          senha: senhaHash
+        username,
+        email,
+        password: passwordHash
       });
       
-      const token_register = jwt.sign({ nome }, process.env.SECRET, {
-          expiresIn: '1d'
+      const token_register = jwt.sign({ username }, process.env.SECRET, {
+        expiresIn: '1d'
       });
 
       const data = {
-          id: user.id,
-          nome: user.nome,
-          email: user.email,
-          token: token_register
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        token: token_register
       }
       
       return res.status(201).json(data);
 
-  } catch (error) {
-      return res.status(402).json({message: "erro user controller"})
+    } catch (error) {
+      return res.status(402).json({ message: "erro user controller" })
+    }
   }
-}
 
-
-module.exports = {
-  async getUserById(call, callback) {
-    const { id } = call.request;
-
-    const user = await User.findById(id);
-
-    if (!user) {
-      return callback(null, { error: 'User not found' });
+  async auth(req: Request, res: Response, next: NextFunction) {
+    const auth_header = req.headers.authorization;
+    
+    if (!auth_header) {
+      return res.status(401).json({ message: 'token nulo' });
     }
-
-    return callback(null, {
-      user: { ...user.toObject(), id: user._id, password: undefined },
-    });
-  },
-
-  async registerUser(call, callback) {
-    const { email, username, password } = call.request.user;
-
-    const user = await User.create({ email, username, password });
-
-    return callback(null, { user: { ...user.toObject(), id: user._id } });
-  },
-
-  async loginUser(call, callback) {
-    const { email, password } = call.request.user;
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return callback(null, { error: 'User not found' });
-    }
-
-    if (!(await user.compareHash(password))) {
-      return callback(null, { error: 'Invalid password' });
-    }
-
-    const token = User.generateToken(user);
-
-    return callback(null, {
-      token,
-    });
-  },
-  async authenticate(call, callback) {
-    const { token: fullToken } = call.request;
-
-    if (!fullToken) {
-      callback(null, { error: 'No token provided' });
-    }
-
-    const parts = fullToken.split(' ');
-
-    if (!parts.length === 2) {
-      return callback(null, { error: 'Token error' });
-    }
-
-    const [scheme, token] = parts;
-
-    if (!/^Bearer$/i.test(scheme)) {
-      return callback(null, { error: 'Token malformatted' });
-    }
+    
+    const [, token] = auth_header.split(' ');
 
     try {
-      const decoded = await promisify(jwt.verify)(token, 'Rodz & Higo');
-
-      const user = await User.findById(decoded.id);
-
-      return callback(null, { user: { ...user.toObject(), id: user._id } });
-    } catch (err) {
-      return callback(null, { error: 'Token invalid' });
+      await jwt.verify(token, process.env.SECRET);
+      next();
     }
-  },
-};
+    catch (error) {
+      return res.status(401).json({ message: 'token expirou' })
+    }
+  }
+
+  async login(req: Request, res: Response) {
+    const { email, password } = req.body;
+  
+    try {
+      const user = await getRepository(User).find({
+        where: {
+          email
+        }
+      });
+  
+      if (await bcrypt.compare(password, user[0].password)) {
+  
+        const token_login = jwt.sign({ email }, process.env.SECRET, {
+          expiresIn: '1d'
+        });
+  
+        const data = {
+          id: user[0].id,
+          nome: user[0].username,
+          email: user[0].email,
+          token: token_login
+        }
+            
+        return res.json(data);
+      } else {
+        return res.status(404).json({ messge: "erro no login controler" })
+      }
+  
+    } catch (err) {
+      return res.status(402).json({ message: "erro user controller" })
+    }
+  }
+
+  async getUser(req: Request, res: Response) {
+    try{
+      const id = req.params.id;
+    
+      const user = await getRepository(User).findOne({
+        select: ['id', 'username', 'email'],
+        where: {
+          id
+        }
+      });
+
+      return res.json(user);
+    } catch (error) {
+      return res.status(404).json({ message: "erro ao pegar usuario" })
+    }
+  }
+}
